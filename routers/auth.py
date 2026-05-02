@@ -57,6 +57,7 @@ def _user_out(user: User, db: Session) -> UserOut:
         visits_count=user.visits_count,
         plants_count=plants_count,
         lang_prefs=lang_prefs,
+        collection_locked=bool(user.collection_locked),
     )
 
 

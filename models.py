@@ -16,6 +16,7 @@ class User(Base):
     visits_count = Column(Integer, default=0)
     last_visit_date = Column(Date, nullable=True)
     lang_prefs = Column(String(500), nullable=True)  # JSON: ["english","japanese"]
+    collection_locked = Column(Integer, default=0, nullable=False)  # 0 = public, 1 = private
     created_at = Column(DateTime, server_default=func.now())
 
 

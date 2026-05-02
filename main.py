@@ -13,6 +13,7 @@ def _run_migrations():
     with engine.connect() as conn:
         for stmt in [
             "ALTER TABLE garden_plants ADD COLUMN gifted_by VARCHAR(20) NULL",
+            "ALTER TABLE users ADD COLUMN collection_locked TINYINT(1) NOT NULL DEFAULT 0",
         ]:
             try:
                 conn.execute(text(stmt))

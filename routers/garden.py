@@ -153,13 +153,22 @@ def harvest_plant(
 
 @router.get("/collection", response_model=List[HarvestOut])
 def get_collection(
+    user_id: Optional[str] = Query(default=None),
     q: Optional[str] = Query(default=None),
     skip: int = Query(default=0, ge=0),
     limit: int = Query(default=20, ge=1, le=100),
     current_user_id: str = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ):
-    query = db.query(Harvest).filter(Harvest.user_id == current_user_id)
+    target_id = user_id or current_user_id
+    if target_id != current_user_id:
+        target = db.query(User).filter(User.id == target_id).first()
+        if not target:
+            raise HTTPException(status_code=404, detail="User not found")
+        if target.collection_locked:
+            raise HTTPException(status_code=403, detail="This collection is private")
+
+    query = db.query(Harvest).filter(Harvest.user_id == target_id)
     if q and q.strip():
         query = query.filter(Harvest.word.ilike(f"%{q.strip()}%"))
     rows = query.order_by(Harvest.harvested_at.desc()).offset(skip).limit(limit).all()

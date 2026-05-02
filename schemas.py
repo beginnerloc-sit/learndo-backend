@@ -16,10 +16,15 @@ class UserOut(BaseModel):
     visits_count: int
     plants_count: int = 0
     lang_prefs: Optional[List[str]] = []
+    collection_locked: bool = False
 
 
 class LangPrefsIn(BaseModel):
     langs: List[str]
+
+
+class LockCollectionIn(BaseModel):
+    locked: bool
 
 
 # ---------- Word ----------

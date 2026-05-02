@@ -5,7 +5,7 @@ Idempotent: skips insertion if users table is already populated.
 
 from passlib.context import CryptContext
 from sqlalchemy.orm import Session
-from models import User, Word, Friend, GardenPlant
+from models import User, Word, Friend, GardenPlant, Harvest, WordReaction
 
 _pwd = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -78,6 +78,28 @@ INITIAL_PLANTS = [
     {"id": "plant-013", "user_id": "u1", "word": "merci",   "x":  -80.0, "y":  420.0, "stage": 5, "plot_id": 0, "scale": 1.0},
 ]
 
+# Real-user account (looked up by email at seed time, not by hardcoded id).
+# Each gets a different reaction emoji so the prismatic cards show every style at once.
+TIENLOC_EMAIL = "loctientran235@gmail.com"
+
+TIENLOC_HARVEST_WORDS = [
+    {"word": "verde",   "lang": "Spanish",  "lang_color": "#c1325a"},
+    {"word": "perro",   "lang": "Spanish",  "lang_color": "#c1325a"},
+    {"word": "flor",    "lang": "Spanish",  "lang_color": "#c1325a"},
+    {"word": "さくら",   "lang": "Japanese", "lang_color": "#b53a6a"},
+    {"word": "rot",     "lang": "German",   "lang_color": "#5a3e8e"},
+    {"word": "danke",   "lang": "German",   "lang_color": "#5a3e8e"},
+]
+
+TIENLOC_REACTIONS = [
+    {"word": "verde",  "from_user_id": "u2", "from_name": "Amara",  "emoji": "🌸"},
+    {"word": "perro",  "from_user_id": "u3", "from_name": "Felix",  "emoji": "💧"},
+    {"word": "flor",   "from_user_id": "u4", "from_name": "Mia",    "emoji": "✨"},
+    {"word": "さくら", "from_user_id": "u5", "from_name": "Soren",  "emoji": "🌟"},
+    {"word": "rot",    "from_user_id": "u6", "from_name": "Yuki",   "emoji": "💕"},
+    {"word": "danke",  "from_user_id": "u7", "from_name": "Carlos", "emoji": "🌈"},
+]
+
 
 def _exists(db: Session, model, **kwargs) -> bool:
     return db.query(model).filter_by(**kwargs).first() is not None
@@ -111,6 +133,24 @@ def run_seed(db: Session) -> None:
         if _exists(db, GardenPlant, id=p["id"]):
             continue
         db.add(GardenPlant(**p))
+    db.flush()
+
+    # Apply harvests + reactions to the real Tien Loc account (looked up by
+    # email — gracefully no-op if they haven't registered yet).
+    tienloc = db.query(User).filter(User.email == TIENLOC_EMAIL).first()
+    if tienloc:
+        for h in TIENLOC_HARVEST_WORDS:
+            if _exists(db, Harvest, user_id=tienloc.id, word=h["word"]):
+                continue
+            db.add(Harvest(user_id=tienloc.id, **h))
+        db.flush()
+
+        for r in TIENLOC_REACTIONS:
+            if _exists(db, WordReaction, owner_user_id=tienloc.id, word=r["word"]):
+                continue
+            db.add(WordReaction(owner_user_id=tienloc.id, **r))
+    else:
+        print(f"[seed] Skipping reactions — no user with email {TIENLOC_EMAIL!r}")
 
     db.commit()
     print("[seed] Seed complete.")

@@ -8,7 +8,7 @@ from typing import List, Optional
 from database import get_db
 from deps import get_current_user_id
 from models import User, GardenPlant, Friend, Harvest
-from schemas import UserOut, LeaderboardEntry, LangPrefsIn
+from schemas import UserOut, LeaderboardEntry, LangPrefsIn, LockCollectionIn
 
 router = APIRouter(prefix="/users", tags=["users"])
 
@@ -40,6 +40,7 @@ def _user_to_out(user: User, db: Session) -> UserOut:
         visits_count=user.visits_count,
         plants_count=plants_count,
         lang_prefs=_parse_lang_prefs(user.lang_prefs),
+        collection_locked=bool(user.collection_locked),
     )
 
 
@@ -66,6 +67,21 @@ def update_lang_prefs(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     user.lang_prefs = json.dumps(langs)
+    db.commit()
+    db.refresh(user)
+    return _user_to_out(user, db)
+
+
+@router.patch("/me/collection-lock", response_model=UserOut)
+def update_collection_lock(
+    body: LockCollectionIn,
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    user.collection_locked = 1 if body.locked else 0
     db.commit()
     db.refresh(user)
     return _user_to_out(user, db)
