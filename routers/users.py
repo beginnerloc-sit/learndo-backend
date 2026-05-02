@@ -1,14 +1,17 @@
 import json
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from routers.auth import update_streak
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 from typing import List, Optional
 
 from database import get_db
 from deps import get_current_user_id
-from models import User, GardenPlant, Friend, Harvest
-from schemas import UserOut, LeaderboardEntry, LangPrefsIn, UserSettingsIn, LockCollectionIn
+from models import User, GardenPlant, Friend, FriendRequest, Harvest
+from schemas import (
+    UserOut, LeaderboardEntry, LangPrefsIn, UserSettingsIn,
+    LockCollectionIn, AddFriendIn, FriendRequestOut,
+)
 
 router = APIRouter(prefix="/users", tags=["users"])
 
@@ -136,6 +139,156 @@ def get_my_friends(
     )
     ids = [row[0] for row in friend_ids]
     users = db.query(User).filter(User.id.in_(ids)).all()
+    return [_user_to_out(u, db) for u in users]
+
+
+def _make_friends(user_id: str, friend_id: str, db: Session) -> None:
+    """Insert both directions of the friendship, idempotently."""
+    if not db.query(Friend).filter_by(user_id=user_id, friend_id=friend_id).first():
+        db.add(Friend(user_id=user_id, friend_id=friend_id))
+    if not db.query(Friend).filter_by(user_id=friend_id, friend_id=user_id).first():
+        db.add(Friend(user_id=friend_id, friend_id=user_id))
+
+
+def _request_out(req: FriendRequest, other: User, db: Session) -> FriendRequestOut:
+    return FriendRequestOut(id=req.id, user=_user_to_out(other, db), created_at=str(req.created_at))
+
+
+@router.post("/me/friend-requests", response_model=FriendRequestOut, status_code=status.HTTP_201_CREATED)
+def send_friend_request(
+    body: AddFriendIn,
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    if body.friend_id == user_id:
+        raise HTTPException(status_code=400, detail="Can't befriend yourself")
+    target = db.query(User).filter(User.id == body.friend_id).first()
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    if db.query(Friend).filter_by(user_id=user_id, friend_id=body.friend_id).first():
+        raise HTTPException(status_code=409, detail="Already friends")
+
+    # If the other user has already sent ME a request, auto-accept (mutual interest).
+    incoming = db.query(FriendRequest).filter_by(
+        from_user_id=body.friend_id, to_user_id=user_id,
+    ).first()
+    if incoming:
+        _make_friends(user_id, body.friend_id, db)
+        out = _request_out(incoming, target, db)
+        db.delete(incoming)
+        db.commit()
+        return out
+
+    # Already sent → return existing (idempotent)
+    existing = db.query(FriendRequest).filter_by(
+        from_user_id=user_id, to_user_id=body.friend_id,
+    ).first()
+    if existing:
+        return _request_out(existing, target, db)
+
+    fr = FriendRequest(from_user_id=user_id, to_user_id=body.friend_id)
+    db.add(fr)
+    db.commit()
+    db.refresh(fr)
+    return _request_out(fr, target, db)
+
+
+@router.get("/me/friend-requests", response_model=List[FriendRequestOut])
+def get_incoming_requests(
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    rows = db.query(FriendRequest).filter_by(to_user_id=user_id).order_by(FriendRequest.created_at.desc()).all()
+    out = []
+    for r in rows:
+        u = db.query(User).filter(User.id == r.from_user_id).first()
+        if u:
+            out.append(_request_out(r, u, db))
+    return out
+
+
+@router.get("/me/friend-requests/sent", response_model=List[FriendRequestOut])
+def get_outgoing_requests(
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    rows = db.query(FriendRequest).filter_by(from_user_id=user_id).order_by(FriendRequest.created_at.desc()).all()
+    out = []
+    for r in rows:
+        u = db.query(User).filter(User.id == r.to_user_id).first()
+        if u:
+            out.append(_request_out(r, u, db))
+    return out
+
+
+@router.post("/me/friend-requests/{request_id}/accept", response_model=UserOut)
+def accept_friend_request(
+    request_id: int,
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    fr = db.query(FriendRequest).filter_by(id=request_id, to_user_id=user_id).first()
+    if not fr:
+        raise HTTPException(status_code=404, detail="Request not found")
+    other = db.query(User).filter(User.id == fr.from_user_id).first()
+    if not other:
+        db.delete(fr); db.commit()
+        raise HTTPException(status_code=404, detail="Sender no longer exists")
+    _make_friends(user_id, fr.from_user_id, db)
+    db.delete(fr)
+    db.commit()
+    return _user_to_out(other, db)
+
+
+@router.delete("/me/friend-requests/{request_id}", status_code=status.HTTP_204_NO_CONTENT)
+def decline_or_cancel_request(
+    request_id: int,
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    fr = db.query(FriendRequest).filter(
+        FriendRequest.id == request_id,
+        or_(FriendRequest.from_user_id == user_id, FriendRequest.to_user_id == user_id),
+    ).first()
+    if not fr:
+        raise HTTPException(status_code=404, detail="Request not found")
+    db.delete(fr)
+    db.commit()
+    return None
+
+
+@router.delete("/me/friends/{friend_id}", status_code=status.HTTP_204_NO_CONTENT)
+def remove_friend(
+    friend_id: str,
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    db.query(Friend).filter(
+        or_(
+            (Friend.user_id == user_id) & (Friend.friend_id == friend_id),
+            (Friend.user_id == friend_id) & (Friend.friend_id == user_id),
+        )
+    ).delete(synchronize_session=False)
+    db.commit()
+    return None
+
+
+@router.get("/search", response_model=List[UserOut])
+def search_users(
+    q: str = Query(..., min_length=1, max_length=100),
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    """Search users by name or email (case-insensitive partial match). Excludes self."""
+    pattern = f"%{q.strip()}%"
+    users = (
+        db.query(User)
+        .filter(User.id != user_id)
+        .filter(or_(User.name.ilike(pattern), User.email.ilike(pattern)))
+        .order_by(User.name.asc())
+        .limit(20)
+        .all()
+    )
     return [_user_to_out(u, db) for u in users]
 
 

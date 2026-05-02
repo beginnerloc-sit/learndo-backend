@@ -1,5 +1,6 @@
 import json
 import random
+from datetime import date
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func
@@ -29,6 +30,8 @@ FALLBACK_GLOSSES = [
     "to look carefully at something for a particular purpose",
 ]
 FALLBACK_WORDS = ["run", "blue", "small", "joy", "food", "move"]
+
+DAILY_SEED_LIMIT = 20  # max fresh OpenAI-generated seeds per user per day
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -93,6 +96,31 @@ def _user_existing_words(user_id: str, db: Session) -> set:
     plants = db.query(GardenPlant.word).filter(GardenPlant.user_id == user_id).all()
     harvests = db.query(Harvest.word).filter(Harvest.user_id == user_id).all()
     return {p[0] for p in plants} | {h[0] for h in harvests}
+
+
+def _check_daily_seed_quota(user_id: str, db: Session) -> User:
+    """Raise 429 if the user has already claimed today's quota.
+    Returns the User row so the caller can mutate the counter once they actually
+    consume a seed."""
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    today = date.today()
+    if user.seeds_today_date != today:
+        # roll over to a new day
+        user.seeds_today_date = today
+        user.seeds_today_count = 0
+    if (user.seeds_today_count or 0) >= DAILY_SEED_LIMIT:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Daily seed limit reached ({DAILY_SEED_LIMIT}). Try planting gifts from friends — those don't count!",
+        )
+    return user
+
+
+def _consume_daily_seed(user: User, db: Session) -> None:
+    user.seeds_today_count = (user.seeds_today_count or 0) + 1
+    db.commit()
 
 
 async def _fetch_or_cache_external(word_str: str, db: Session) -> Optional[Word]:
@@ -192,6 +220,7 @@ async def get_quiz_word(
     db: Session = Depends(get_db),
 ):
     if settings.word_service == "openai":
+        user = _check_daily_seed_quota(current_user_id, db)
         lang = _pick_lang(current_user_id, db)
         s = _user_settings(current_user_id, db)
         existing = _user_existing_words(current_user_id, db)
@@ -204,6 +233,7 @@ async def get_quiz_word(
             target = _cache_word(pkg, db)
             quiz = _pick_from_pool(target)
             if quiz:
+                _consume_daily_seed(user, db)
                 return quiz
         raise HTTPException(status_code=503, detail="Could not generate a quiz. Try again.")
 
@@ -243,6 +273,7 @@ async def get_random_word(
     db: Session = Depends(get_db),
 ):
     if settings.word_service == "openai":
+        user = _check_daily_seed_quota(current_user_id, db)
         lang = _pick_lang(current_user_id, db)
         s = _user_settings(current_user_id, db)
         existing = _user_existing_words(current_user_id, db)
@@ -253,6 +284,7 @@ async def get_random_word(
             if pkg["word"] in existing:
                 continue
             target = _cache_word(pkg, db)
+            _consume_daily_seed(user, db)
             return RandomWordOut(
                 word=target.word, lang=target.lang, lang_color=target.lang_color,
                 ipa=target.ipa, gloss=target.gloss,

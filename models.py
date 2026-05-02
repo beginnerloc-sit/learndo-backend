@@ -20,6 +20,8 @@ class User(Base):
     topic_prefs = Column(String(500), nullable=True)       # JSON: ["nature","food",...]
     definition_lang = Column(String(20), nullable=True)    # language used for word definitions, default "english"
     collection_locked = Column(Integer, default=0, nullable=False)  # 0 = public, 1 = private
+    seeds_today_count = Column(Integer, default=0, nullable=False)  # daily seeds claimed via OpenAI
+    seeds_today_date = Column(Date, nullable=True)         # the date `seeds_today_count` is for
     created_at = Column(DateTime, server_default=func.now())
 
 
@@ -60,6 +62,15 @@ class Friend(Base):
 
     user_id = Column(String(20), primary_key=True)
     friend_id = Column(String(20), primary_key=True)
+
+
+class FriendRequest(Base):
+    __tablename__ = "friend_requests"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    from_user_id = Column(String(20), nullable=False, index=True)
+    to_user_id = Column(String(20), nullable=False, index=True)
+    created_at = Column(DateTime, server_default=func.now())
 
 
 class WordReaction(Base):

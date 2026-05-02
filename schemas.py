@@ -26,6 +26,16 @@ class LangPrefsIn(BaseModel):
     langs: List[str]
 
 
+class AddFriendIn(BaseModel):
+    friend_id: str
+
+
+class FriendRequestOut(BaseModel):
+    id: int
+    user: UserOut       # the other party — sender for incoming, recipient for outgoing
+    created_at: str
+
+
 class UserSettingsIn(BaseModel):
     """All-in-one settings update — every field optional, only set ones change."""
     langs: Optional[List[str]] = None
