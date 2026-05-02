@@ -15,7 +15,10 @@ class User(Base):
     coins = Column(Integer, default=0)
     visits_count = Column(Integer, default=0)
     last_visit_date = Column(Date, nullable=True)
-    lang_prefs = Column(String(500), nullable=True)  # JSON: ["english","japanese"]
+    lang_prefs = Column(String(500), nullable=True)        # JSON: ["english","japanese"]
+    vocab_level = Column(String(20), nullable=True)        # "beginner" | "intermediate" | "advanced"
+    topic_prefs = Column(String(500), nullable=True)       # JSON: ["nature","food",...]
+    definition_lang = Column(String(20), nullable=True)    # language used for word definitions, default "english"
     collection_locked = Column(Integer, default=0, nullable=False)  # 0 = public, 1 = private
     created_at = Column(DateTime, server_default=func.now())
 

@@ -41,12 +41,17 @@ def update_streak(user: User, db: Session) -> None:
     db.commit()
 
 
+def _safe_json_list(raw):
+    if not raw:
+        return []
+    try:
+        return json.loads(raw)
+    except Exception:
+        return []
+
+
 def _user_out(user: User, db: Session) -> UserOut:
     plants_count = db.query(GardenPlant).filter(GardenPlant.user_id == user.id).count()
-    try:
-        lang_prefs = json.loads(user.lang_prefs) if user.lang_prefs else []
-    except Exception:
-        lang_prefs = []
     return UserOut(
         id=user.id,
         name=user.name,
@@ -56,7 +61,10 @@ def _user_out(user: User, db: Session) -> UserOut:
         coins=user.coins,
         visits_count=user.visits_count,
         plants_count=plants_count,
-        lang_prefs=lang_prefs,
+        lang_prefs=_safe_json_list(user.lang_prefs),
+        vocab_level=user.vocab_level,
+        topic_prefs=_safe_json_list(user.topic_prefs),
+        definition_lang=user.definition_lang or "english",
         collection_locked=bool(user.collection_locked),
     )
 

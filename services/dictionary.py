@@ -99,10 +99,22 @@ async def fetch_definition(word: str) -> dict:
     return await _fetch_definition_external(word)
 
 
-async def fetch_full_quiz_package(lang: str = "english"):
+async def fetch_full_quiz_package(
+    lang: str = "english",
+    vocab_level=None,
+    topic_prefs=None,
+    definition_lang: str = "english",
+    exclude_words=None,
+):
     """
     OpenAI mode: one call → word + definition + quiz pool (3-4 types).
     Returns None if the call fails or produces an unusable word.
     """
     from services.openai_dictionary import fetch_full_quiz_package as _openai_pkg
-    return await _openai_pkg(lang=lang)
+    return await _openai_pkg(
+        lang=lang,
+        vocab_level=vocab_level,
+        topic_prefs=topic_prefs,
+        definition_lang=definition_lang,
+        exclude_words=exclude_words,
+    )

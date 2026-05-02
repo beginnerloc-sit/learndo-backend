@@ -14,6 +14,9 @@ def _run_migrations():
         for stmt in [
             "ALTER TABLE garden_plants ADD COLUMN gifted_by VARCHAR(20) NULL",
             "ALTER TABLE users ADD COLUMN collection_locked TINYINT(1) NOT NULL DEFAULT 0",
+            "ALTER TABLE users ADD COLUMN vocab_level VARCHAR(20) NULL",
+            "ALTER TABLE users ADD COLUMN topic_prefs VARCHAR(500) NULL",
+            "ALTER TABLE users ADD COLUMN definition_lang VARCHAR(20) NULL",
         ]:
             try:
                 conn.execute(text(stmt))

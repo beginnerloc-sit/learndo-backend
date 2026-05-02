@@ -155,6 +155,8 @@ def harvest_plant(
 def get_collection(
     user_id: Optional[str] = Query(default=None),
     q: Optional[str] = Query(default=None),
+    lang: Optional[str] = Query(default=None),
+    reaction: Optional[str] = Query(default=None),
     skip: int = Query(default=0, ge=0),
     limit: int = Query(default=20, ge=1, le=100),
     current_user_id: str = Depends(get_current_user_id),
@@ -171,6 +173,14 @@ def get_collection(
     query = db.query(Harvest).filter(Harvest.user_id == target_id)
     if q and q.strip():
         query = query.filter(Harvest.word.ilike(f"%{q.strip()}%"))
+    if lang and lang.strip():
+        query = query.filter(Harvest.lang == lang.strip())
+    if reaction and reaction.strip():
+        reacted_words = db.query(WordReaction.word).filter(
+            WordReaction.owner_user_id == target_id,
+            WordReaction.emoji == reaction.strip(),
+        ).subquery()
+        query = query.filter(Harvest.word.in_(reacted_words))
     rows = query.order_by(Harvest.harvested_at.desc()).offset(skip).limit(limit).all()
     return [_harvest_out(h, db) for h in rows]
 

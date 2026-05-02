@@ -16,11 +16,22 @@ class UserOut(BaseModel):
     visits_count: int
     plants_count: int = 0
     lang_prefs: Optional[List[str]] = []
+    vocab_level: Optional[str] = None
+    topic_prefs: Optional[List[str]] = []
+    definition_lang: Optional[str] = "english"
     collection_locked: bool = False
 
 
 class LangPrefsIn(BaseModel):
     langs: List[str]
+
+
+class UserSettingsIn(BaseModel):
+    """All-in-one settings update — every field optional, only set ones change."""
+    langs: Optional[List[str]] = None
+    vocab_level: Optional[str] = None
+    topic_prefs: Optional[List[str]] = None
+    definition_lang: Optional[str] = None
 
 
 class LockCollectionIn(BaseModel):
@@ -162,12 +173,13 @@ class LeaderboardEntry(BaseModel):
 # ---------- Quiz ----------
 
 class QuizOut(BaseModel):
-    quiz_type: str          # "meaning" | "fill_blank" | "synonym" | "antonym"
+    quiz_type: str          # "meaning" | "rearrange" | "synonym" | "antonym"
     word: str
     lang: str
     lang_color: str
     ipa: Optional[str] = None
     gloss: str              # always the definition, shown as context
-    question: Optional[str] = None  # sentence with ___ (fill_blank only)
-    correct: str            # the correct answer label
-    distractors: List[str]  # 3 wrong answer labels
+    question: Optional[str] = None        # rearrange: sentence meaning shown as hint; legacy fill_blank: sentence with ___
+    correct: str            # for rearrange: tokens joined by space; for others: the answer label
+    correct_tokens: Optional[List[str]] = None  # rearrange-only: ordered correct tokens
+    distractors: List[str]  # for rearrange: extra distractor tokens; for others: 3 wrong answer labels

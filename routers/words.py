@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from config import get_settings
 from database import get_db
 from deps import get_current_user_id
-from models import Word, User
+from models import Word, User, GardenPlant, Harvest
 from schemas import WordOut, RandomWordOut, QuizOut
 from services.dictionary import fetch_random_word, fetch_definition, fetch_full_quiz_package
 
@@ -71,6 +71,30 @@ def _pick_lang(user_id: str, db: Session) -> str:
     return random.choice(prefs) if prefs else "english"
 
 
+def _user_settings(user_id: str, db: Session) -> dict:
+    """Load the user's quiz-related settings (level, topics, definition lang)."""
+    import json as _json
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        return {"vocab_level": None, "topic_prefs": None, "definition_lang": "english"}
+    try:
+        topics = _json.loads(user.topic_prefs) if user.topic_prefs else None
+    except Exception:
+        topics = None
+    return {
+        "vocab_level": user.vocab_level,
+        "topic_prefs": topics or None,
+        "definition_lang": user.definition_lang or "english",
+    }
+
+
+def _user_existing_words(user_id: str, db: Session) -> set:
+    """Words the user already has — planted or harvested. Used to avoid repeats."""
+    plants = db.query(GardenPlant.word).filter(GardenPlant.user_id == user_id).all()
+    harvests = db.query(Harvest.word).filter(Harvest.user_id == user_id).all()
+    return {p[0] for p in plants} | {h[0] for h in harvests}
+
+
 async def _fetch_or_cache_external(word_str: str, db: Session) -> Optional[Word]:
     cached = db.query(Word).filter(Word.word == word_str).first()
     if cached:
@@ -90,7 +114,8 @@ def _pad_distractors(lst: list, fallback: list, n: int = 3) -> list:
 
 
 def _quiz_out(target: Word, quiz_type: str, correct: str, distractors: list,
-              question: Optional[str] = None) -> QuizOut:
+              question: Optional[str] = None,
+              correct_tokens: Optional[list] = None) -> QuizOut:
     return QuizOut(
         quiz_type=quiz_type,
         word=target.word,
@@ -100,12 +125,14 @@ def _quiz_out(target: Word, quiz_type: str, correct: str, distractors: list,
         gloss=target.gloss or "an English word",
         question=question,
         correct=correct,
+        correct_tokens=correct_tokens,
         distractors=distractors,
     )
 
 
 def _pick_from_pool(target: Word, stage: int = 0) -> Optional[QuizOut]:
-    """Pick quiz at pool[stage % len(pool)] so each watering gets a different type."""
+    """Pick quiz at pool[stage % len(pool)] so each watering gets a different type.
+    Skips legacy fill_blank entries (those are no longer accepted)."""
     if not target.quiz_pool:
         return None
     try:
@@ -115,18 +142,32 @@ def _pick_from_pool(target: Word, stage: int = 0) -> Optional[QuizOut]:
     if not pool:
         return None
 
-    q = pool[stage % len(pool)]
-    qtype = q.get("type")
-    correct = q.get("correct", "")
-    distractors = q.get("distractors", [])
-    question = q.get("question")
+    # Try `len(pool)` candidates starting at stage; skip unsupported types.
+    for i in range(len(pool)):
+        q = pool[(stage + i) % len(pool)]
+        qtype = q.get("type")
+        correct = q.get("correct", "")
+        distractors = q.get("distractors", [])
+        if not qtype or not correct:
+            continue
 
-    if not qtype or not correct or len(distractors) < 3:
-        return None
-    if qtype == "fill_blank" and (not question or "___" not in question):
-        return None
+        if qtype == "rearrange":
+            tokens = q.get("correct_tokens") or []
+            if not isinstance(tokens, list) or len(tokens) < 3 or len(distractors) < 2:
+                continue
+            return _quiz_out(target, "rearrange", correct, list(distractors)[:3],
+                             question=q.get("sentence_meaning") or None,
+                             correct_tokens=list(tokens))
 
-    return _quiz_out(target, qtype, correct, distractors[:3], question)
+        if qtype in ("meaning", "synonym", "antonym"):
+            if len(distractors) < 3:
+                continue
+            return _quiz_out(target, qtype, correct, list(distractors)[:3])
+
+        # Legacy fill_blank — skip; pool will get refreshed eventually
+        # or another type in the pool will be used.
+
+    return None
 
 
 # ── External-mode quiz builders (DB-sourced distractors) ─────────────────────
@@ -141,14 +182,6 @@ def _meaning_quiz_external(target: Word, db: Session) -> QuizOut:
     return _quiz_out(target, "meaning", target.gloss or "an English word", distractors)
 
 
-def _fill_blank_quiz_external(target: Word, db: Session) -> QuizOut:
-    rows = (
-        db.query(Word.word)
-        .filter(Word.word != target.word, Word.lang == target.lang)
-        .order_by(func.rand()).limit(3).all()
-    )
-    distractors = _pad_distractors([r[0] for r in rows if r[0]], FALLBACK_WORDS)
-    return _quiz_out(target, "fill_blank", target.word, distractors, target.example_sentence)
 
 
 # ── Routes ────────────────────────────────────────────────────────────────────
@@ -160,10 +193,14 @@ async def get_quiz_word(
 ):
     if settings.word_service == "openai":
         lang = _pick_lang(current_user_id, db)
+        s = _user_settings(current_user_id, db)
+        existing = _user_existing_words(current_user_id, db)
         for _ in range(5):
-            pkg = await fetch_full_quiz_package(lang=lang)
+            pkg = await fetch_full_quiz_package(lang=lang, **s, exclude_words=list(existing)[:30])
             if not pkg:
                 continue
+            if pkg["word"] in existing:
+                continue  # OpenAI returned a duplicate anyway — try again
             target = _cache_word(pkg, db)
             quiz = _pick_from_pool(target)
             if quiz:
@@ -197,8 +234,6 @@ def get_word_quiz(
         return quiz
 
     # Fallback for words without a pool (external mode or pre-pool words)
-    if target.example_sentence and "___" in target.example_sentence and random.random() > 0.4:
-        return _fill_blank_quiz_external(target, db)
     return _meaning_quiz_external(target, db)
 
 
@@ -209,14 +244,19 @@ async def get_random_word(
 ):
     if settings.word_service == "openai":
         lang = _pick_lang(current_user_id, db)
+        s = _user_settings(current_user_id, db)
+        existing = _user_existing_words(current_user_id, db)
         for _ in range(5):
-            pkg = await fetch_full_quiz_package(lang=lang)
-            if pkg:
-                target = _cache_word(pkg, db)
-                return RandomWordOut(
-                    word=target.word, lang=target.lang, lang_color=target.lang_color,
-                    ipa=target.ipa, gloss=target.gloss,
-                )
+            pkg = await fetch_full_quiz_package(lang=lang, **s, exclude_words=list(existing)[:30])
+            if not pkg:
+                continue
+            if pkg["word"] in existing:
+                continue
+            target = _cache_word(pkg, db)
+            return RandomWordOut(
+                word=target.word, lang=target.lang, lang_color=target.lang_color,
+                ipa=target.ipa, gloss=target.gloss,
+            )
         raise HTTPException(status_code=503, detail="Could not generate a word. Try again.")
 
     for _ in range(10):

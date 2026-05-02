@@ -8,14 +8,20 @@ from typing import List, Optional
 from database import get_db
 from deps import get_current_user_id
 from models import User, GardenPlant, Friend, Harvest
-from schemas import UserOut, LeaderboardEntry, LangPrefsIn, LockCollectionIn
+from schemas import UserOut, LeaderboardEntry, LangPrefsIn, UserSettingsIn, LockCollectionIn
 
 router = APIRouter(prefix="/users", tags=["users"])
 
 VALID_LANGS = {"english", "vietnamese", "japanese", "chinese", "french", "german", "spanish"}
+VALID_LEVELS = {"beginner", "intermediate", "advanced"}
+VALID_TOPICS = {
+    "nature", "food", "emotion", "science", "music", "architecture",
+    "geography", "sport", "technology", "philosophy", "medicine", "art",
+    "mythology", "law", "economics", "literature", "astronomy", "cooking",
+}
 
 
-def _parse_lang_prefs(raw: Optional[str]) -> List[str]:
+def _parse_json_list(raw: Optional[str]) -> List[str]:
     if not raw:
         return []
     try:
@@ -39,7 +45,10 @@ def _user_to_out(user: User, db: Session) -> UserOut:
         coins=user.coins,
         visits_count=user.visits_count,
         plants_count=plants_count,
-        lang_prefs=_parse_lang_prefs(user.lang_prefs),
+        lang_prefs=_parse_json_list(user.lang_prefs),
+        vocab_level=user.vocab_level,
+        topic_prefs=_parse_json_list(user.topic_prefs),
+        definition_lang=user.definition_lang or "english",
         collection_locked=bool(user.collection_locked),
     )
 
@@ -67,6 +76,34 @@ def update_lang_prefs(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     user.lang_prefs = json.dumps(langs)
+    db.commit()
+    db.refresh(user)
+    return _user_to_out(user, db)
+
+
+@router.patch("/me/settings", response_model=UserOut)
+def update_settings(
+    body: UserSettingsIn,
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    if body.langs is not None:
+        langs = [l for l in body.langs if l in VALID_LANGS][:3]
+        user.lang_prefs = json.dumps(langs)
+    if body.vocab_level is not None:
+        if body.vocab_level not in VALID_LEVELS:
+            raise HTTPException(status_code=400, detail="Invalid vocab_level")
+        user.vocab_level = body.vocab_level
+    if body.topic_prefs is not None:
+        topics = [t for t in body.topic_prefs if t in VALID_TOPICS][:6]
+        user.topic_prefs = json.dumps(topics)
+    if body.definition_lang is not None:
+        if body.definition_lang not in VALID_LANGS:
+            raise HTTPException(status_code=400, detail="Invalid definition_lang")
+        user.definition_lang = body.definition_lang
     db.commit()
     db.refresh(user)
     return _user_to_out(user, db)
