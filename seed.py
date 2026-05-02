@@ -79,11 +79,14 @@ INITIAL_PLANTS = [
 ]
 
 
-def run_seed(db: Session) -> None:
-    if db.query(User).count() > 0:
-        return
+def _exists(db: Session, model, **kwargs) -> bool:
+    return db.query(model).filter_by(**kwargs).first() is not None
 
+
+def run_seed(db: Session) -> None:
     for u in USERS:
+        if _exists(db, User, id=u["id"]):
+            continue
         data = {k: v for k, v in u.items() if not k.startswith("_")}
         if "_demo_password" in u:
             data["password_hash"] = _pwd.hash(u["_demo_password"])
@@ -91,17 +94,23 @@ def run_seed(db: Session) -> None:
     db.flush()
 
     for word_str, info in WORD_INFO.items():
+        if _exists(db, Word, word=word_str):
+            continue
         db.add(Word(word=word_str, **info))
     db.flush()
 
     friend_ids = ["u2", "u3", "u4", "u5", "u6", "u7"]
     for fid in friend_ids:
-        db.add(Friend(user_id="u1", friend_id=fid))
-        db.add(Friend(user_id=fid, friend_id="u1"))
+        if not _exists(db, Friend, user_id="u1", friend_id=fid):
+            db.add(Friend(user_id="u1", friend_id=fid))
+        if not _exists(db, Friend, user_id=fid, friend_id="u1"):
+            db.add(Friend(user_id=fid, friend_id="u1"))
     db.flush()
 
     for p in INITIAL_PLANTS:
+        if _exists(db, GardenPlant, id=p["id"]):
+            continue
         db.add(GardenPlant(**p))
 
     db.commit()
-    print("[seed] Database seeded successfully.")
+    print("[seed] Seed complete.")
