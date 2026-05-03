@@ -8,7 +8,7 @@ class Settings(BaseSettings):
     secret_key: str = "change-me-in-production"
     token_expire_days: int = 30
     # "external" uses API-Ninjas + Free Dictionary API
-    # "openai"   uses OpenAI o4-mini for both random word and definition
+    # "openai"   uses OpenAI gpt-5-nano for both random word and definition
     word_service: str = "external"
     openai_api_key: str = ""
 

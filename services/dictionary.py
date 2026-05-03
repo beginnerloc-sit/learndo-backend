@@ -1,7 +1,7 @@
 """
 Word data service — dispatches to either:
   - "external"  API-Ninjas (random word) + Free Dictionary API (definition)
-  - "openai"    OpenAI o4-mini for both random word and definition
+  - "openai"    OpenAI gpt-5-nano for both random word and definition
 
 Controlled by WORD_SERVICE=external|openai in .env (default: external).
 """

@@ -1,5 +1,5 @@
 """
-Word data service backed by OpenAI o4-mini.
+Word data service backed by OpenAI gpt-5-nano.
 
 Single public function fetch_full_quiz_package(lang):
   One API call returns the word + all its linguistic data + a pool of
@@ -52,6 +52,43 @@ _PRONUNCIATION_FORMAT = {
 def _pronunciation_clause(lang_key: str) -> str:
     return _PRONUNCIATION_FORMAT.get(lang_key, _PRONUNCIATION_FORMAT["english"])
 
+
+# Shared schema for the 5-quiz pool used by both fresh seeds and crossbred seeds.
+# Kept in one place so the crossbreed prompt can't drift and accidentally produce
+# only a single meaning quiz (which it did before this was extracted).
+_QUIZ_POOL_SPEC = """\
+"quizzes": array of EXACTLY 5 quiz objects using the following types \
+(vary the types; you may repeat a type with different distractors if needed):
+
+  {{ "type": "meaning",
+     "correct": <the {def_lang_name} gloss above>,
+     "distractors": [3 plausible but wrong one-sentence definitions in {def_lang_name}] }}
+
+  {{ "type": "rearrange",
+     "correct_tokens": [<ordered list of 4-8 tokens — words/particles — that, when joined \
+with single spaces, form a natural {lang_name} sentence that USES the target word; \
+tokenize at the natural word boundary level for the language (single space-separated \
+words for Latin scripts; logical word/particle units for Japanese/Chinese)>],
+     "sentence_meaning": <a natural translation of the full sentence written in \
+{def_lang_name} — shown to the player as a hint for what sentence they need to build>,
+     "distractors": [3 plausible {lang_name} word/particle distractors that DON'T \
+belong in this sentence and would not form a valid sentence if used] }}
+
+  {{ "type": "synonym",
+     "correct": <a common {lang_name} synonym>,
+     "distractors": [3 {lang_name} words that are NOT synonyms] }}
+
+  {{ "type": "antonym",
+     "correct": <a common {lang_name} antonym>,
+     "distractors": [3 {lang_name} words that are NOT antonyms] }}
+
+Quiz rules:
+- Produce exactly 5 quiz objects. If a type (e.g. antonym) doesn't apply, use a \
+different type instead — never produce fewer than 5.
+- All distractor arrays must have exactly 3 items.
+- Definitions/meanings/distractors for "meaning" type MUST be written in {def_lang_name}.\
+"""
+
 _SEED_TOPICS = [
     "nature", "food", "emotion", "science", "music", "architecture",
     "geography", "sport", "technology", "philosophy", "medicine", "art",
@@ -76,32 +113,9 @@ Return a single JSON object with EXACTLY these keys:
 "part_of_speech"   : noun | verb | adjective | adverb | etc., or null
 "example_sentence" : a short natural {lang_name} sentence using the word (or any \
 inflection) replaced by ___, or null if unnatural
-"quizzes"          : array of EXACTLY 5 quiz objects using the following types \
-(vary the types; you may repeat a type with different distractors if needed):
+""" + _QUIZ_POOL_SPEC + """
 
-  {{ "type": "meaning",
-     "correct": <the {def_lang_name} gloss above>,
-     "distractors": [3 plausible but wrong one-sentence definitions in {def_lang_name}] }}
-
-  {{ "type": "rearrange",
-     "correct_tokens": [<ordered list of 4-8 tokens — words/particles — that, when joined with single spaces, form a natural {lang_name} sentence that USES the target word; tokenize at the natural word boundary level for the language (single space-separated words for Latin scripts; logical word/particle units for Japanese/Chinese)>],
-     "sentence_meaning": <a natural translation of the full sentence written in {def_lang_name} — this is shown to the player as a hint for what sentence they need to build>,
-     "distractors": [3 plausible {lang_name} word/particle distractors that DON'T belong in this sentence and would not form a valid sentence if used] }}
-
-  {{ "type": "synonym",
-     "correct": <a common {lang_name} synonym>,
-     "distractors": [3 {lang_name} words that are NOT synonyms] }}
-
-  {{ "type": "antonym",
-     "correct": <a common {lang_name} antonym>,
-     "distractors": [3 {lang_name} words that are NOT antonyms] }}
-
-Rules:
-- Produce exactly 5 quiz objects. If a type (e.g. antonym) doesn't apply, \
-use a different type instead — never produce fewer than 5.
-- All distractor arrays must have exactly 3 items.
-- Definitions/meanings/distractors for "meaning" and "fill_blank" types MUST be written in {def_lang_name}.
-- Return ONLY valid JSON. No markdown fences. No extra text.
+Return ONLY valid JSON. No markdown fences. No extra text.
 """
 
 
@@ -139,16 +153,17 @@ REQUIREMENTS:
 - No nonsense made-up combinations
 - {level_line}
 
-Return ONLY JSON, no markdown, no text outside the JSON:
-{{
-  "word":             <the new word/phrase in native {target_lang_name} script>,
-  "ipa":              <pronunciation guide for {target_lang_name} — format: {pronunciation_format}>,
-  "gloss":            <one-sentence definition in {def_lang_name}>,
-  "part_of_speech":   <noun | verb | adjective | phrase | etc., or null>,
-  "example_sentence": <natural {target_lang_name} sentence with the word replaced by ___, or null>,
-  "connection":       <one-sentence in {def_lang_name} explaining why this word connects to BOTH parents>,
-  "quizzes": [array of EXACTLY 5 quiz objects in the same format used elsewhere — meaning, rearrange, synonym, antonym types]
-}}
+Return a single JSON object with EXACTLY these keys (no markdown, no text outside the JSON):
+
+"word"             : the new word/phrase in native {target_lang_name} script
+"ipa"              : pronunciation guide for {target_lang_name} — format: {pronunciation_format}
+"gloss"            : one-sentence definition in {def_lang_name}
+"part_of_speech"   : noun | verb | adjective | phrase | etc., or null
+"example_sentence" : natural {target_lang_name} sentence with the word replaced by ___, or null
+"connection"       : one-sentence in {def_lang_name} explaining why this word connects to BOTH parents
+""" + _QUIZ_POOL_SPEC.replace("{lang_name}", "{target_lang_name}") + """
+
+Return ONLY valid JSON. No markdown fences. No extra text.
 """
 
 
@@ -184,7 +199,7 @@ async def crossbreed_quiz_package(
     )
 
     resp = await _get_client().chat.completions.create(
-        model="o4-mini",
+        model="gpt-5-nano",
         messages=[{"role": "user", "content": prompt}],
         max_completion_tokens=4000,
         reasoning_effort="low",
@@ -289,7 +304,7 @@ async def fetch_full_quiz_package(
     )
 
     resp = await _get_client().chat.completions.create(
-        model="o4-mini",
+        model="gpt-5-nano",
         messages=[{"role": "user", "content": prompt_text}],
         max_completion_tokens=4000,
         reasoning_effort="low",
