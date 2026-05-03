@@ -35,6 +35,23 @@ LANG_INFO = {
     "spanish":    {"name": "Spanish",    "color": "#5a9333"},
 }
 
+# Per-language pronunciation format. Stored on the same `ipa` column for
+# back-compat, but the actual content varies — Chinese gets Hanyu Pinyin,
+# Japanese gets Hepburn romaji, etc.
+_PRONUNCIATION_FORMAT = {
+    "english":    'IPA inside slashes, e.g. "/wɜːrd/"',
+    "french":     'IPA inside slashes, e.g. "/pɔm/"',
+    "german":     'IPA inside slashes, e.g. "/buːx/"',
+    "spanish":    'IPA inside slashes, e.g. "/ˈka.sa/"',
+    "chinese":    'Hanyu Pinyin with tone MARKS (not numbers), e.g. "nǐ hǎo" — DO NOT return IPA',
+    "japanese":   'Hepburn romaji (lowercase, no macrons needed), e.g. "neko", "sakura" — DO NOT return IPA',
+    "vietnamese": 'null (Vietnamese spelling already encodes pronunciation — return null for this field)',
+}
+
+
+def _pronunciation_clause(lang_key: str) -> str:
+    return _PRONUNCIATION_FORMAT.get(lang_key, _PRONUNCIATION_FORMAT["english"])
+
 _SEED_TOPICS = [
     "nature", "food", "emotion", "science", "music", "architecture",
     "geography", "sport", "technology", "philosophy", "medicine", "art",
@@ -54,7 +71,7 @@ a thematically adjacent word.{exclude_line}
 Return a single JSON object with EXACTLY these keys:
 
 "word"             : the chosen {lang_name} word (written in its native script)
-"ipa"              : IPA pronunciation e.g. /wɜːrd/, or null
+"ipa"              : pronunciation guide for {lang_name} — format: {pronunciation_format}
 "gloss"            : concise one-sentence definition WRITTEN IN {def_lang_name}
 "part_of_speech"   : noun | verb | adjective | adverb | etc., or null
 "example_sentence" : a short natural {lang_name} sentence using the word (or any \
@@ -125,7 +142,7 @@ REQUIREMENTS:
 Return ONLY JSON, no markdown, no text outside the JSON:
 {{
   "word":             <the new word/phrase in native {target_lang_name} script>,
-  "ipa":              <IPA pronunciation, or null>,
+  "ipa":              <pronunciation guide for {target_lang_name} — format: {pronunciation_format}>,
   "gloss":            <one-sentence definition in {def_lang_name}>,
   "part_of_speech":   <noun | verb | adjective | phrase | etc., or null>,
   "example_sentence": <natural {target_lang_name} sentence with the word replaced by ___, or null>,
@@ -163,6 +180,7 @@ async def crossbreed_quiz_package(
         target_lang_name=target_lang_name,
         def_lang_name=def_lang_name,
         level_line=level_line,
+        pronunciation_format=_pronunciation_clause(target_lang),
     )
 
     resp = await _get_client().chat.completions.create(
@@ -210,7 +228,9 @@ async def crossbreed_quiz_package(
         "word":             word,
         "lang":             target_lang_name,
         "lang_color":       info["color"],
-        "ipa":              (data.get("ipa") or "").strip("/") or None,
+        # Pronunciation kept verbatim — backend preserves whatever format the
+        # prompt asked for (slashes for IPA langs, plain text for pinyin/romaji).
+        "ipa":              (data.get("ipa") or "").strip() or None,
         "gloss":            data.get("gloss"),
         "part_of_speech":   data.get("part_of_speech") or None,
         "example_sentence": (data.get("example_sentence") or "").strip() or None,
@@ -265,6 +285,7 @@ async def fetch_full_quiz_package(
         topic=topic,
         level_line=level_line,
         exclude_line=exclude_line,
+        pronunciation_format=_pronunciation_clause(lang),
     )
 
     resp = await _get_client().chat.completions.create(
@@ -321,7 +342,9 @@ async def fetch_full_quiz_package(
         "word":             word,
         "lang":             lang_name,
         "lang_color":       info["color"],
-        "ipa":              (data.get("ipa") or "").strip("/") or None,
+        # Pronunciation kept verbatim — IPA langs come back with slashes,
+        # pinyin/romaji without; the frontend renders this string as-is.
+        "ipa":              (data.get("ipa") or "").strip() or None,
         "gloss":            data.get("gloss"),
         "part_of_speech":   data.get("part_of_speech") or None,
         "example_sentence": None,
