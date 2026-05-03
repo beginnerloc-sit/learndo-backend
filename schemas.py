@@ -119,6 +119,21 @@ class PlantGiftIn(BaseModel):
     y: float
 
 
+class CrossbreedIn(BaseModel):
+    word1: str
+    word2: str
+
+
+class CrossbreedOut(BaseModel):
+    word: str
+    lang: str
+    lang_color: str
+    ipa: Optional[str] = None
+    gloss: Optional[str] = None
+    connection: Optional[str] = None
+    level: Optional[str] = None
+
+
 class ReactIn(BaseModel):
     owner_user_id: str
     word: str

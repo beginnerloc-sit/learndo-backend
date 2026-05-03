@@ -11,7 +11,10 @@ from schemas import (
     GardenPlantOut, GardenPlantCreate, GardenPlantMove,
     HarvestOut, ReactIn, GiftIn, ReactionOut,
     PendingGiftOut, PlantGiftIn,
+    CrossbreedIn, CrossbreedOut,
 )
+from config import get_settings as _get_app_settings
+from services.openai_dictionary import crossbreed_quiz_package
 
 router = APIRouter(prefix="/garden", tags=["garden"])
 
@@ -306,6 +309,78 @@ def plant_pending_gift(
     db.commit()
     db.refresh(plant)
     return _plant_to_out(plant, db)
+
+
+@router.post("/crossbreed", response_model=CrossbreedOut)
+async def crossbreed(
+    body: CrossbreedIn,
+    current_user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    """Combine two of the user's harvested words into a new related word."""
+    if body.word1 == body.word2:
+        raise HTTPException(status_code=400, detail="Pick two different words")
+
+    h1 = db.query(Harvest).filter(Harvest.user_id == current_user_id, Harvest.word == body.word1).first()
+    h2 = db.query(Harvest).filter(Harvest.user_id == current_user_id, Harvest.word == body.word2).first()
+    if not h1 or not h2:
+        raise HTTPException(status_code=403, detail="You must have harvested both words")
+
+    w1 = db.query(Word).filter(Word.word == body.word1).first()
+    w2 = db.query(Word).filter(Word.word == body.word2).first()
+
+    # Daily quota — crossbreeding uses OpenAI, so it counts toward the same 20/day cap.
+    from routers.words import _check_daily_seed_quota, _consume_daily_seed, _cache_word, _user_settings
+    user = _check_daily_seed_quota(current_user_id, db)
+    s = _user_settings(current_user_id, db)
+
+    # Target language: same as word1's language; fallback to user's first study lang
+    target_lang_name = (w1.lang if w1 else h1.lang) or "English"
+    LANG_NAME_TO_KEY = {
+        "English": "english", "Vietnamese": "vietnamese", "Japanese": "japanese",
+        "Chinese": "chinese", "French": "french", "German": "german", "Spanish": "spanish",
+    }
+    target_lang = LANG_NAME_TO_KEY.get(target_lang_name, "english")
+
+    # Pick the higher level of the two parents
+    LEVEL_RANK = {"beginner": 1, "intermediate": 2, "advanced": 3}
+    parent_levels = [w.level for w in (w1, w2) if w and w.level]
+    target_level = max(parent_levels, key=lambda l: LEVEL_RANK.get(l, 1)) if parent_levels else s.get("vocab_level")
+
+    settings_obj = _get_app_settings()
+    if settings_obj.word_service != "openai":
+        raise HTTPException(status_code=503, detail="Crossbreeding requires OpenAI mode")
+
+    pkg = None
+    for _ in range(3):
+        pkg = await crossbreed_quiz_package(
+            word1=body.word1,
+            word1_gloss=(w1.gloss if w1 else "") or "",
+            word1_lang=(w1.lang  if w1 else h1.lang) or "",
+            word2=body.word2,
+            word2_gloss=(w2.gloss if w2 else "") or "",
+            word2_lang=(w2.lang  if w2 else h2.lang) or "",
+            target_lang=target_lang,
+            vocab_level=target_level,
+            definition_lang=s.get("definition_lang", "english"),
+        )
+        if pkg:
+            break
+    if not pkg:
+        raise HTTPException(status_code=503, detail="Couldn't crossbreed these words. Try again.")
+
+    target = _cache_word(pkg, db, level=target_level)
+    _consume_daily_seed(user, db)
+
+    return CrossbreedOut(
+        word=target.word,
+        lang=target.lang,
+        lang_color=target.lang_color,
+        ipa=target.ipa,
+        gloss=target.gloss,
+        connection=pkg.get("connection") or "",
+        level=target.level,
+    )
 
 
 @router.patch("/{plant_id}/advance", response_model=GardenPlantOut)

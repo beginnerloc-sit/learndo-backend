@@ -100,6 +100,127 @@ def _parse_json(raw: str, label: str, finish_reason: str = "") -> Optional[dict]
         return None
 
 
+_CROSSBREED_PROMPT = """\
+You are creating a "crossbred" word for a language-learning game.
+
+Given two words a player has already mastered:
+1. "{w1}" ({w1_lang}) — meaning: "{w1_gloss}"
+2. "{w2}" ({w2_lang}) — meaning: "{w2_gloss}"
+
+Generate ONE NEW {target_lang_name} word, compound, or short phrase that meaningfully \
+combines or connects these two parent concepts. Choose the BEST single result, \
+in this priority order:
+1. A real {target_lang_name} compound word formed from both parents (e.g., "sun" + \
+"flower" → "sunflower"). Only use if a real recognized compound exists.
+2. A real {target_lang_name} word that thematically bridges both meanings \
+(e.g., "fire" + "water" → "steam"; "sun" + "moon" → "eclipse").
+3. A short natural {target_lang_name} phrase (3–6 words) that meaningfully uses both ideas.
+
+REQUIREMENTS:
+- The output MUST be a real word/phrase a fluent speaker would actually use
+- It must make logical sense — both parents must connect to it naturally
+- No nonsense made-up combinations
+- {level_line}
+
+Return ONLY JSON, no markdown, no text outside the JSON:
+{{
+  "word":             <the new word/phrase in native {target_lang_name} script>,
+  "ipa":              <IPA pronunciation, or null>,
+  "gloss":            <one-sentence definition in {def_lang_name}>,
+  "part_of_speech":   <noun | verb | adjective | phrase | etc., or null>,
+  "example_sentence": <natural {target_lang_name} sentence with the word replaced by ___, or null>,
+  "connection":       <one-sentence in {def_lang_name} explaining why this word connects to BOTH parents>,
+  "quizzes": [array of EXACTLY 5 quiz objects in the same format used elsewhere — meaning, rearrange, synonym, antonym types]
+}}
+"""
+
+
+async def crossbreed_quiz_package(
+    word1: str, word1_gloss: str, word1_lang: str,
+    word2: str, word2_gloss: str, word2_lang: str,
+    target_lang: str = "english",
+    vocab_level: Optional[str] = None,
+    definition_lang: str = "english",
+) -> Optional[dict]:
+    """
+    Combine two harvested words into a NEW related {target_lang} word/phrase.
+    Returns a pkg dict compatible with `_cache_word`, with an extra "connection" field.
+    """
+    info     = LANG_INFO.get(target_lang,    LANG_INFO["english"])
+    def_info = LANG_INFO.get(definition_lang, LANG_INFO["english"])
+    target_lang_name = info["name"]
+    def_lang_name    = def_info["name"]
+
+    level_line = _LEVEL_GUIDANCE.get(vocab_level or "intermediate", _LEVEL_GUIDANCE["intermediate"])
+    if "{lang_name}" not in level_line:
+        level_line = level_line.replace("a beginner learner",       f"a beginner {target_lang_name} learner") \
+                               .replace("an intermediate learner",  f"an intermediate {target_lang_name} learner") \
+                               .replace("a fluent speaker",         f"a fluent {target_lang_name} speaker")
+
+    prompt = _CROSSBREED_PROMPT.format(
+        w1=word1, w1_gloss=word1_gloss, w1_lang=word1_lang,
+        w2=word2, w2_gloss=word2_gloss, w2_lang=word2_lang,
+        target_lang_name=target_lang_name,
+        def_lang_name=def_lang_name,
+        level_line=level_line,
+    )
+
+    resp = await _get_client().chat.completions.create(
+        model="o4-mini",
+        messages=[{"role": "user", "content": prompt}],
+        max_completion_tokens=4000,
+        reasoning_effort="low",
+    )
+    choice = resp.choices[0]
+    raw = (choice.message.content or "").strip()
+    data = _parse_json(raw, f"<cross-{word1}-{word2}>", choice.finish_reason)
+    if not data:
+        return None
+
+    word = (data.get("word") or "").strip()
+    if not word or not data.get("gloss"):
+        return None
+
+    # Reuse the same quiz-extraction logic as fetch_full_quiz_package
+    quizzes = []
+    for q in (data.get("quizzes") or []):
+        qtype = q.get("type")
+        if not qtype:
+            continue
+        if qtype == "rearrange":
+            tokens = [str(t).strip() for t in (q.get("correct_tokens") or []) if str(t).strip()]
+            distractors = [str(x).strip() for x in (q.get("distractors") or []) if x][:3]
+            if len(tokens) < 3 or len(distractors) < 2:
+                continue
+            quizzes.append({
+                "type": "rearrange",
+                "correct": " ".join(tokens),
+                "correct_tokens": tokens,
+                "distractors": distractors,
+                "sentence_meaning": (q.get("sentence_meaning") or "").strip(),
+            })
+            continue
+        correct     = (q.get("correct") or "").strip()
+        distractors = [str(x).strip() for x in (q.get("distractors") or []) if x][:3]
+        if not correct or len(distractors) < 3:
+            continue
+        quizzes.append({"type": qtype, "correct": correct, "distractors": distractors})
+
+    pkg = {
+        "word":             word,
+        "lang":             target_lang_name,
+        "lang_color":       info["color"],
+        "ipa":              (data.get("ipa") or "").strip("/") or None,
+        "gloss":            data.get("gloss"),
+        "part_of_speech":   data.get("part_of_speech") or None,
+        "example_sentence": (data.get("example_sentence") or "").strip() or None,
+        "quizzes":          quizzes,
+        "connection":       (data.get("connection") or "").strip(),
+    }
+    print(f"[openai] crossbreed {word1!r} + {word2!r} → {word!r}")
+    return pkg
+
+
 async def fetch_full_quiz_package(
     lang: str = "english",
     vocab_level: Optional[str] = None,
