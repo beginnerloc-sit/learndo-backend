@@ -364,6 +364,7 @@ async def fetch_full_quiz_package(
         "part_of_speech":   data.get("part_of_speech") or None,
         "example_sentence": None,
         "quizzes":          quizzes,
+        "topic":            topic,
     }
     ex = (data.get("example_sentence") or "").strip()
     if "___" in ex:

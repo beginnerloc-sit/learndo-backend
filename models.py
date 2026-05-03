@@ -38,6 +38,7 @@ class Word(Base):
     example_sentence = Column(Text, nullable=True)
     quiz_pool = Column(Text, nullable=True)  # JSON array of quiz objects
     level = Column(String(20), nullable=True)  # "beginner" | "intermediate" | "advanced"
+    topic = Column(String(40), nullable=True)  # e.g. "nature","food" — set when OpenAI generated this word
     seen = Column(Integer, default=0)
     mastery = Column(Integer, default=1)
     fetched_at = Column(DateTime, server_default=func.now())

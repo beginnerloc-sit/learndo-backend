@@ -60,6 +60,7 @@ class WordOut(BaseModel):
     gloss: Optional[str] = None
     part_of_speech: Optional[str] = None
     level: Optional[str] = None         # "beginner" | "intermediate" | "advanced"
+    topic: Optional[str] = None         # e.g. "nature","food" — set on OpenAI-generated words
     seen: int = 0
     mastery: int = 1
 
@@ -97,6 +98,7 @@ class GardenPlantOut(BaseModel):
     part_of_speech: Optional[str] = None
     example_sentence: Optional[str] = None
     level: Optional[str] = None      # "beginner" | "intermediate" | "advanced"
+    topic: Optional[str] = None      # e.g. "nature","food"
     reactions: List[ReactionOut] = []
     gifted_by: Optional[str] = None
     gifted_by_name: Optional[str] = None
@@ -185,6 +187,7 @@ class HarvestOut(BaseModel):
     gloss: Optional[str] = None
     ipa: Optional[str] = None
     level: Optional[str] = None
+    topic: Optional[str] = None
     harvested_at: str = ""
     reactions: List[ReactionOut] = []
 

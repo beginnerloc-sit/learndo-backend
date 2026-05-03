@@ -53,6 +53,7 @@ def _plant_to_out(plant: GardenPlant, db: Session) -> GardenPlantOut:
         part_of_speech=word_row.part_of_speech if word_row else None,
         example_sentence=word_row.example_sentence if word_row else None,
         level=word_row.level if word_row else None,
+        topic=word_row.topic if word_row else None,
         reactions=reactions,
         gifted_by=plant.gifted_by,
         gifted_by_name=gifted_by_name,
@@ -67,6 +68,7 @@ def _harvest_out(h: Harvest, db: Session) -> HarvestOut:
         gloss=wrow.gloss if wrow else None,
         ipa=wrow.ipa if wrow else None,
         level=wrow.level if wrow else None,
+        topic=wrow.topic if wrow else None,
         harvested_at=str(h.harvested_at),
         reactions=reactions,
     )

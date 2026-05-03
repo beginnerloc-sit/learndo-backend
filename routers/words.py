@@ -44,6 +44,8 @@ def _cache_word(pkg: dict, db: Session, level: Optional[str] = None) -> Word:
             row.quiz_pool = json.dumps(pkg["quizzes"]); changed = True
         if not row.level and level:
             row.level = level; changed = True
+        if not row.topic and pkg.get("topic"):
+            row.topic = pkg["topic"]; changed = True
         if changed:
             db.commit()
         return row
@@ -57,6 +59,7 @@ def _cache_word(pkg: dict, db: Session, level: Optional[str] = None) -> Word:
         example_sentence=pkg.get("example_sentence"),
         quiz_pool=json.dumps(pkg["quizzes"]) if pkg.get("quizzes") else None,
         level=level,
+        topic=pkg.get("topic"),
         seen=0,
         mastery=1,
     )
