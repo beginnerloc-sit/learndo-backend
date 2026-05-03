@@ -15,7 +15,7 @@ from schemas import (
 
 router = APIRouter(prefix="/garden", tags=["garden"])
 
-MAX_STAGE = 5
+MAX_STAGE = 4   # 3 visual stages with internal stages 0-4 (waterings)
 
 REACTION_EMOJIS = {"🌸", "💧", "✨", "🌟", "💕", "🌈"}
 
@@ -49,6 +49,7 @@ def _plant_to_out(plant: GardenPlant, db: Session) -> GardenPlantOut:
         gloss=word_row.gloss if word_row else None,
         part_of_speech=word_row.part_of_speech if word_row else None,
         example_sentence=word_row.example_sentence if word_row else None,
+        level=word_row.level if word_row else None,
         reactions=reactions,
         gifted_by=plant.gifted_by,
         gifted_by_name=gifted_by_name,
@@ -62,6 +63,7 @@ def _harvest_out(h: Harvest, db: Session) -> HarvestOut:
         id=h.id, word=h.word, lang=h.lang, lang_color=h.lang_color,
         gloss=wrow.gloss if wrow else None,
         ipa=wrow.ipa if wrow else None,
+        level=wrow.level if wrow else None,
         harvested_at=str(h.harvested_at),
         reactions=reactions,
     )
@@ -135,7 +137,7 @@ def harvest_plant(
     if not plant:
         raise HTTPException(status_code=404, detail="Plant not found")
     if plant.stage < MAX_STAGE:
-        raise HTTPException(status_code=400, detail="Plant must reach stage 5 before harvesting")
+        raise HTTPException(status_code=400, detail="Plant must be fully grown before harvesting")
 
     word_row = db.query(Word).filter(Word.word == plant.word).first()
     harvest = Harvest(

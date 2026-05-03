@@ -59,6 +59,7 @@ class WordOut(BaseModel):
     ipa: Optional[str] = None
     gloss: Optional[str] = None
     part_of_speech: Optional[str] = None
+    level: Optional[str] = None         # "beginner" | "intermediate" | "advanced"
     seen: int = 0
     mastery: int = 1
 
@@ -95,6 +96,7 @@ class GardenPlantOut(BaseModel):
     gloss: Optional[str] = None
     part_of_speech: Optional[str] = None
     example_sentence: Optional[str] = None
+    level: Optional[str] = None      # "beginner" | "intermediate" | "advanced"
     reactions: List[ReactionOut] = []
     gifted_by: Optional[str] = None
     gifted_by_name: Optional[str] = None
@@ -167,6 +169,7 @@ class HarvestOut(BaseModel):
     lang_color: str
     gloss: Optional[str] = None
     ipa: Optional[str] = None
+    level: Optional[str] = None
     harvested_at: str = ""
     reactions: List[ReactionOut] = []
 

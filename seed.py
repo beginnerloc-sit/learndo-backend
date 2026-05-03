@@ -63,19 +63,19 @@ WORD_INFO = {
 # Coordinates are in SVG-space (same system GardenWorld.jsx uses for rendering)
 # SVG_TO_PH(x, y) = { x: x+450, y: y+100 } — used internally by Phaser
 INITIAL_PLANTS = [
-    {"id": "plant-001", "user_id": "u1", "word": "manzana", "x": -260.0, "y":    0.0, "stage": 5, "plot_id": 0, "scale": 1.0},
-    {"id": "plant-002", "user_id": "u1", "word": "casa",    "x": -160.0, "y":  -40.0, "stage": 5, "plot_id": 0, "scale": 1.0},
-    {"id": "plant-003", "user_id": "u1", "word": "agua",    "x": -340.0, "y":   80.0, "stage": 5, "plot_id": 0, "scale": 1.0},
-    {"id": "plant-004", "user_id": "u1", "word": "hola",    "x": -260.0, "y":  140.0, "stage": 5, "plot_id": 0, "scale": 1.0},
-    {"id": "plant-005", "user_id": "u1", "word": "本",       "x":   60.0, "y":  -60.0, "stage": 5, "plot_id": 0, "scale": 1.0},
-    {"id": "plant-006", "user_id": "u1", "word": "りんご",   "x":  180.0, "y":    0.0, "stage": 5, "plot_id": 0, "scale": 1.0},
-    {"id": "plant-007", "user_id": "u1", "word": "猫",       "x":  -20.0, "y":   80.0, "stage": 5, "plot_id": 0, "scale": 1.0},
-    {"id": "plant-008", "user_id": "u1", "word": "Buch",    "x": -300.0, "y":  240.0, "stage": 5, "plot_id": 0, "scale": 1.0},
-    {"id": "plant-009", "user_id": "u1", "word": "Haus",    "x": -200.0, "y":  300.0, "stage": 5, "plot_id": 0, "scale": 1.0},
-    {"id": "plant-010", "user_id": "u1", "word": "soleil",  "x":  -40.0, "y":  280.0, "stage": 5, "plot_id": 0, "scale": 1.0},
-    {"id": "plant-011", "user_id": "u1", "word": "pomme",   "x":   80.0, "y":  220.0, "stage": 5, "plot_id": 0, "scale": 1.0},
-    {"id": "plant-012", "user_id": "u1", "word": "lune",    "x":  140.0, "y":  340.0, "stage": 5, "plot_id": 0, "scale": 1.0},
-    {"id": "plant-013", "user_id": "u1", "word": "merci",   "x":  -80.0, "y":  420.0, "stage": 5, "plot_id": 0, "scale": 1.0},
+    {"id": "plant-001", "user_id": "u1", "word": "manzana", "x": -260.0, "y":    0.0, "stage": 4, "plot_id": 0, "scale": 1.0},
+    {"id": "plant-002", "user_id": "u1", "word": "casa",    "x": -160.0, "y":  -40.0, "stage": 4, "plot_id": 0, "scale": 1.0},
+    {"id": "plant-003", "user_id": "u1", "word": "agua",    "x": -340.0, "y":   80.0, "stage": 4, "plot_id": 0, "scale": 1.0},
+    {"id": "plant-004", "user_id": "u1", "word": "hola",    "x": -260.0, "y":  140.0, "stage": 4, "plot_id": 0, "scale": 1.0},
+    {"id": "plant-005", "user_id": "u1", "word": "本",       "x":   60.0, "y":  -60.0, "stage": 4, "plot_id": 0, "scale": 1.0},
+    {"id": "plant-006", "user_id": "u1", "word": "りんご",   "x":  180.0, "y":    0.0, "stage": 4, "plot_id": 0, "scale": 1.0},
+    {"id": "plant-007", "user_id": "u1", "word": "猫",       "x":  -20.0, "y":   80.0, "stage": 4, "plot_id": 0, "scale": 1.0},
+    {"id": "plant-008", "user_id": "u1", "word": "Buch",    "x": -300.0, "y":  240.0, "stage": 4, "plot_id": 0, "scale": 1.0},
+    {"id": "plant-009", "user_id": "u1", "word": "Haus",    "x": -200.0, "y":  300.0, "stage": 4, "plot_id": 0, "scale": 1.0},
+    {"id": "plant-010", "user_id": "u1", "word": "soleil",  "x":  -40.0, "y":  280.0, "stage": 4, "plot_id": 0, "scale": 1.0},
+    {"id": "plant-011", "user_id": "u1", "word": "pomme",   "x":   80.0, "y":  220.0, "stage": 4, "plot_id": 0, "scale": 1.0},
+    {"id": "plant-012", "user_id": "u1", "word": "lune",    "x":  140.0, "y":  340.0, "stage": 4, "plot_id": 0, "scale": 1.0},
+    {"id": "plant-013", "user_id": "u1", "word": "merci",   "x":  -80.0, "y":  420.0, "stage": 4, "plot_id": 0, "scale": 1.0},
 ]
 
 # Real-user account (looked up by email at seed time, not by hardcoded id).
@@ -149,8 +149,33 @@ def run_seed(db: Session) -> None:
             if _exists(db, WordReaction, owner_user_id=tienloc.id, word=r["word"]):
                 continue
             db.add(WordReaction(owner_user_id=tienloc.id, **r))
+
+        # Grow every planted seed in Tien Loc's garden to stage 5 and give it
+        # a compliment from a different friend (cycling through the 6 emojis).
+        plants = db.query(GardenPlant).filter(GardenPlant.user_id == tienloc.id).all()
+        reaction_cycle = [
+            ("🌸", "u2", "Amara"),
+            ("💧", "u3", "Felix"),
+            ("✨", "u4", "Mia"),
+            ("🌟", "u5", "Soren"),
+            ("💕", "u6", "Yuki"),
+            ("🌈", "u7", "Carlos"),
+        ]
+        for i, plant in enumerate(plants):
+            if plant.stage < 4:
+                plant.stage = 4
+            if not _exists(db, WordReaction, owner_user_id=tienloc.id, word=plant.word):
+                emoji, from_id, from_name = reaction_cycle[i % len(reaction_cycle)]
+                db.add(WordReaction(
+                    owner_user_id=tienloc.id,
+                    word=plant.word,
+                    from_user_id=from_id,
+                    from_name=from_name,
+                    emoji=emoji,
+                ))
+        print(f"[seed] Tien Loc: grew {len(plants)} plants to stage 5 + added reactions.")
     else:
-        print(f"[seed] Skipping reactions — no user with email {TIENLOC_EMAIL!r}")
+        print(f"[seed] Skipping Tien Loc reactions — no user with email {TIENLOC_EMAIL!r}")
 
     db.commit()
     print("[seed] Seed complete.")

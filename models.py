@@ -37,6 +37,7 @@ class Word(Base):
     part_of_speech = Column(String(100), nullable=True)
     example_sentence = Column(Text, nullable=True)
     quiz_pool = Column(Text, nullable=True)  # JSON array of quiz objects
+    level = Column(String(20), nullable=True)  # "beginner" | "intermediate" | "advanced"
     seen = Column(Integer, default=0)
     mastery = Column(Integer, default=1)
     fetched_at = Column(DateTime, server_default=func.now())

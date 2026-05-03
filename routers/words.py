@@ -36,11 +36,15 @@ DAILY_SEED_LIMIT = 20  # max fresh OpenAI-generated seeds per user per day
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-def _cache_word(pkg: dict, db: Session) -> Word:
+def _cache_word(pkg: dict, db: Session, level: Optional[str] = None) -> Word:
     row = db.query(Word).filter(Word.word == pkg["word"]).first()
     if row:
+        changed = False
         if not row.quiz_pool and pkg.get("quizzes"):
-            row.quiz_pool = json.dumps(pkg["quizzes"])
+            row.quiz_pool = json.dumps(pkg["quizzes"]); changed = True
+        if not row.level and level:
+            row.level = level; changed = True
+        if changed:
             db.commit()
         return row
     row = Word(
@@ -52,6 +56,7 @@ def _cache_word(pkg: dict, db: Session) -> Word:
         part_of_speech=pkg.get("part_of_speech"),
         example_sentence=pkg.get("example_sentence"),
         quiz_pool=json.dumps(pkg["quizzes"]) if pkg.get("quizzes") else None,
+        level=level,
         seen=0,
         mastery=1,
     )
@@ -230,7 +235,7 @@ async def get_quiz_word(
                 continue
             if pkg["word"] in existing:
                 continue  # OpenAI returned a duplicate anyway — try again
-            target = _cache_word(pkg, db)
+            target = _cache_word(pkg, db, level=s.get("vocab_level"))
             quiz = _pick_from_pool(target)
             if quiz:
                 _consume_daily_seed(user, db)
@@ -283,7 +288,7 @@ async def get_random_word(
                 continue
             if pkg["word"] in existing:
                 continue
-            target = _cache_word(pkg, db)
+            target = _cache_word(pkg, db, level=s.get("vocab_level"))
             _consume_daily_seed(user, db)
             return RandomWordOut(
                 word=target.word, lang=target.lang, lang_color=target.lang_color,

@@ -19,6 +19,7 @@ def _run_migrations():
             "ALTER TABLE users ADD COLUMN definition_lang VARCHAR(20) NULL",
             "ALTER TABLE users ADD COLUMN seeds_today_count INT NOT NULL DEFAULT 0",
             "ALTER TABLE users ADD COLUMN seeds_today_date DATE NULL",
+            "ALTER TABLE words ADD COLUMN level VARCHAR(20) NULL",
         ]:
             try:
                 conn.execute(text(stmt))
