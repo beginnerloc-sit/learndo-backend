@@ -33,10 +33,15 @@ def _parse_json_list(raw: Optional[str]) -> List[str]:
         return []
 
 
-def _user_to_out(user: User, db: Session) -> UserOut:
+def _user_to_out(user: User, db: Session, streak_check=None) -> UserOut:
     plants_count = (
         db.query(GardenPlant)
         .filter(GardenPlant.user_id == user.id)
+        .count()
+    )
+    harvest_count = (
+        db.query(Harvest)
+        .filter(Harvest.user_id == user.id)
         .count()
     )
     return UserOut(
@@ -48,11 +53,14 @@ def _user_to_out(user: User, db: Session) -> UserOut:
         coins=user.coins,
         visits_count=user.visits_count,
         plants_count=plants_count,
+        harvest_count=harvest_count,
         lang_prefs=_parse_json_list(user.lang_prefs),
         vocab_level=user.vocab_level,
         topic_prefs=_parse_json_list(user.topic_prefs),
         definition_lang=user.definition_lang or "english",
         collection_locked=bool(user.collection_locked),
+        tutorial_completed=bool(user.tutorial_completed),
+        streak_check=streak_check,
     )
 
 
@@ -64,8 +72,8 @@ def get_me(
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    update_streak(user, db)
-    return _user_to_out(user, db)
+    info = update_streak(user, db)
+    return _user_to_out(user, db, streak_check=info)
 
 
 @router.patch("/me/lang-prefs", response_model=UserOut)
@@ -122,6 +130,22 @@ def update_collection_lock(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     user.collection_locked = 1 if body.locked else 0
+    db.commit()
+    db.refresh(user)
+    return _user_to_out(user, db)
+
+
+@router.post("/me/tutorial-complete", response_model=UserOut)
+def complete_tutorial(
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    """Marks the gameplay walkthrough as completed for this user.
+    Idempotent — safe to call repeatedly."""
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    user.tutorial_completed = 1
     db.commit()
     db.refresh(user)
     return _user_to_out(user, db)
@@ -287,6 +311,34 @@ def search_users(
         .filter(or_(User.name.ilike(pattern), User.email.ilike(pattern)))
         .order_by(User.name.asc())
         .limit(20)
+        .all()
+    )
+    return [_user_to_out(u, db) for u in users]
+
+
+@router.get("/suggestions", response_model=List[UserOut])
+def get_friend_suggestions(
+    limit: int = Query(default=5, ge=1, le=20),
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    """Random sample of users who are NOT yet friends — for the discover/
+    suggestions strip in FriendsScreen. Excludes:
+      - self
+      - existing friends
+      - users with a pending request in either direction
+    """
+    # IDs to exclude — self + current friends + pending request counterparts
+    exclude_ids = {user_id}
+    exclude_ids.update(f.friend_id for f in db.query(Friend.friend_id).filter(Friend.user_id == user_id).all())
+    exclude_ids.update(r.to_user_id for r in db.query(FriendRequest.to_user_id).filter(FriendRequest.from_user_id == user_id).all())
+    exclude_ids.update(r.from_user_id for r in db.query(FriendRequest.from_user_id).filter(FriendRequest.to_user_id == user_id).all())
+
+    users = (
+        db.query(User)
+        .filter(~User.id.in_(exclude_ids))
+        .order_by(func.rand())
+        .limit(limit)
         .all()
     )
     return [_user_to_out(u, db) for u in users]

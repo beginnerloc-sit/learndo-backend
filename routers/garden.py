@@ -6,12 +6,13 @@ from typing import List, Optional
 
 from database import get_db
 from deps import get_current_user_id
-from models import GardenPlant, Word, Harvest, WordReaction, User, PendingGift
+from models import GardenPlant, Word, Harvest, WordReaction, User, PendingGift, WordNote
 from schemas import (
     GardenPlantOut, GardenPlantCreate, GardenPlantMove,
     HarvestOut, ReactIn, GiftIn, ReactionOut,
     PendingGiftOut, PlantGiftIn,
     CrossbreedIn, CrossbreedOut,
+    WriteNoteIn, WordNoteOut,
 )
 from config import get_settings as _get_app_settings
 from services.openai_dictionary import crossbreed_quiz_package
@@ -31,9 +32,28 @@ def _reactions_for(word: str, owner_user_id: str, db: Session) -> List[ReactionO
     return [ReactionOut(emoji=r.emoji, from_user_id=r.from_user_id, from_name=r.from_name) for r in rows]
 
 
+def _notes_for(word: str, owner_user_id: str, db: Session) -> List[WordNoteOut]:
+    rows = (
+        db.query(WordNote)
+        .filter(WordNote.word == word, WordNote.owner_user_id == owner_user_id)
+        .order_by(WordNote.created_at.desc())
+        .all()
+    )
+    return [
+        WordNoteOut(
+            from_user_id=n.from_user_id,
+            from_name=n.from_name,
+            text=n.text,
+            created_at=str(n.created_at) if n.created_at else "",
+        )
+        for n in rows
+    ]
+
+
 def _plant_to_out(plant: GardenPlant, db: Session) -> GardenPlantOut:
     word_row = db.query(Word).filter(Word.word == plant.word).first()
     reactions = _reactions_for(plant.word, plant.user_id, db)
+    notes = _notes_for(plant.word, plant.user_id, db)
     gifted_by_name = None
     if plant.gifted_by:
         giftor = db.query(User).filter(User.id == plant.gifted_by).first()
@@ -55,6 +75,7 @@ def _plant_to_out(plant: GardenPlant, db: Session) -> GardenPlantOut:
         level=word_row.level if word_row else None,
         topic=word_row.topic if word_row else None,
         reactions=reactions,
+        notes=notes,
         gifted_by=plant.gifted_by,
         gifted_by_name=gifted_by_name,
     )
@@ -222,6 +243,56 @@ def react_to_plant(
     ))
     db.commit()
     return {"ok": True}
+
+
+@router.post("/note", status_code=201, response_model=WordNoteOut)
+def write_note(
+    body: WriteNoteIn,
+    current_user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    """Leave a short text note on one of a friend's plants. One note per
+    (sender, owner, word) — submitting again replaces the previous text."""
+    text = (body.text or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="Note can't be empty")
+    # Notes are intentionally one short sentence.
+    if len(text) > 80:
+        raise HTTPException(status_code=400, detail="Note too long (max 80 chars)")
+    if body.owner_user_id == current_user_id:
+        raise HTTPException(status_code=400, detail="Notes are for friends' plants")
+    plant = db.query(GardenPlant).filter(
+        GardenPlant.user_id == body.owner_user_id,
+        GardenPlant.word == body.word,
+    ).first()
+    if not plant:
+        raise HTTPException(status_code=404, detail="Plant not found")
+    me = db.query(User).filter(User.id == current_user_id).first()
+    # Notes are write-once: each visitor gets a single permanent note per
+    # plant. Re-submitting is rejected so the message can't be edited away.
+    existing = db.query(WordNote).filter(
+        WordNote.word == body.word,
+        WordNote.owner_user_id == body.owner_user_id,
+        WordNote.from_user_id == current_user_id,
+    ).first()
+    if existing:
+        raise HTTPException(status_code=409, detail="You've already left a note on this plant")
+    n = WordNote(
+        word=body.word,
+        owner_user_id=body.owner_user_id,
+        from_user_id=current_user_id,
+        from_name=me.name if me else "",
+        text=text,
+    )
+    db.add(n)
+    db.commit()
+    db.refresh(n)
+    return WordNoteOut(
+        from_user_id=n.from_user_id,
+        from_name=n.from_name,
+        text=n.text,
+        created_at=str(n.created_at) if n.created_at else "",
+    )
 
 
 @router.post("/gift", status_code=201)

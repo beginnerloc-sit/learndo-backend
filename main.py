@@ -21,6 +21,19 @@ def _run_migrations():
             "ALTER TABLE users ADD COLUMN seeds_today_date DATE NULL",
             "ALTER TABLE words ADD COLUMN level VARCHAR(20) NULL",
             "ALTER TABLE words ADD COLUMN topic VARCHAR(40) NULL",
+            "ALTER TABLE users ADD COLUMN tutorial_completed TINYINT(1) NOT NULL DEFAULT 0",
+            (
+                "CREATE TABLE IF NOT EXISTS word_notes ("
+                "id INT AUTO_INCREMENT PRIMARY KEY, "
+                "word VARCHAR(200) NOT NULL, "
+                "owner_user_id VARCHAR(20) NOT NULL, "
+                "from_user_id VARCHAR(20) NOT NULL, "
+                "from_name VARCHAR(100) NOT NULL DEFAULT '', "
+                "text VARCHAR(280) NOT NULL, "
+                "created_at DATETIME DEFAULT CURRENT_TIMESTAMP, "
+                "INDEX idx_word_owner (owner_user_id, word)"
+                ")"
+            ),
         ]:
             try:
                 conn.execute(text(stmt))

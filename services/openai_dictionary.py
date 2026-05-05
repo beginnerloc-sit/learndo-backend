@@ -65,14 +65,16 @@ _QUIZ_POOL_SPEC = """\
      "distractors": [3 plausible but wrong one-sentence definitions in {def_lang_name}] }}
 
   {{ "type": "rearrange",
-     "correct_tokens": [<ordered list of 4-8 tokens — words/particles — that, when joined \
-with single spaces, form a natural {lang_name} sentence that USES the target word; \
-tokenize at the natural word boundary level for the language (single space-separated \
-words for Latin scripts; logical word/particle units for Japanese/Chinese)>],
+     "correct_tokens": [<ordered list of 4-8 single-token strings; each item is \
+ONE word or particle (never an array, never a multi-word phrase). When joined with \
+single spaces they form a natural {lang_name} sentence that USES the target word. \
+Tokenize at the natural word-boundary level: single space-separated words for Latin \
+scripts; logical word/particle units for Japanese/Chinese.>],
      "sentence_meaning": <a natural translation of the full sentence written in \
 {def_lang_name} — shown to the player as a hint for what sentence they need to build>,
-     "distractors": [3 plausible {lang_name} word/particle distractors that DON'T \
-belong in this sentence and would not form a valid sentence if used] }}
+     "distractors": [EXACTLY 3 single-token strings — each item is ONE word or particle \
+in {lang_name}. Never nest arrays. Each distractor must be a plausible-looking word that \
+DOES NOT belong in the correct sentence and would not form a valid sentence if substituted in.] }}
 
   {{ "type": "synonym",
      "correct": <a common {lang_name} synonym>,
@@ -86,6 +88,10 @@ Quiz rules:
 - Produce exactly 5 quiz objects. If a type (e.g. antonym) doesn't apply, use a \
 different type instead — never produce fewer than 5.
 - All distractor arrays must have exactly 3 items.
+- Every entry inside a distractor array MUST be a string. Never put nested arrays \
+or objects inside a distractor array.
+- For the "rearrange" type specifically: every item in `correct_tokens` and `distractors` \
+is ONE word or particle written as a plain string — never an array of words.
 - Definitions/meanings/distractors for "meaning" type MUST be written in {def_lang_name}.\
 """
 
@@ -101,7 +107,46 @@ _LEVEL_GUIDANCE = {
     "advanced":     "Choose a more nuanced, less common word — but still a real word a fluent speaker would actually use.",
 }
 
+# Source-authority rules. Anchors the LLM to attested educational vocabulary and
+# explicitly forbids invented words, technical jargon, or archaisms with no
+# pedagogical value. English maps to specific reference works; other languages
+# get an equivalent "real, attested" rule.
+_ENGLISH_SOURCE_RULES = {
+    "beginner": (
+        "STRICTLY pick the word from the Oxford Learner's Dictionary A1 or A2 "
+        "headword list (essential everyday vocabulary). Real words ONLY — never "
+        "invent forms or use technical jargon."
+    ),
+    "intermediate": (
+        "STRICTLY pick the word from one of these references: Oxford Learner's "
+        "Dictionary B1/B2 headword list, OR the 'Destination B1' / 'Destination "
+        "B2: Grammar & Vocabulary' (Mann & Taylore-Knowles) wordlists. Real "
+        "attested words ONLY — never invent forms or use rare archaisms."
+    ),
+    "advanced": (
+        "STRICTLY pick the word from one of these references: Oxford Learner's "
+        "Dictionary C1/C2 headword list, OR the 'Destination C1 & C2: Grammar & "
+        "Vocabulary' (Mann & Taylore-Knowles) wordlist. Real attested words "
+        "ONLY — never invent forms or use technical jargon outside these refs."
+    ),
+}
+_NON_ENGLISH_SOURCE_RULE = (
+    "STRICTLY pick a real, attested word/phrase that a learner of {lang_name} "
+    "would find in an authoritative dictionary or coursebook for this level. "
+    "Real words ONLY — never invent forms, never use rare archaisms or "
+    "technical jargon with no pedagogical value."
+)
+
+
+def _source_clause(lang_key: str, vocab_level: Optional[str]) -> str:
+    level = (vocab_level or "intermediate").lower()
+    if lang_key == "english":
+        return _ENGLISH_SOURCE_RULES.get(level, _ENGLISH_SOURCE_RULES["intermediate"])
+    return _NON_ENGLISH_SOURCE_RULE
+
 _PROMPT = """\
+{source_clause}
+
 {level_line} The word should relate to the topic '{topic}' if natural, otherwise pick \
 a thematically adjacent word.{exclude_line}
 
@@ -117,6 +162,35 @@ inflection) replaced by ___, or null if unnatural
 
 Return ONLY valid JSON. No markdown fences. No extra text.
 """
+
+
+def _clean_single_token(value) -> str:
+    """For rearrange tokens/distractors: must be a single-word string.
+
+    The model occasionally returns nested arrays (e.g. ["the", "weather"]) for
+    a slot that should be one token, which creates a broken multi-word bubble.
+    Recover gracefully:
+      - if it's a list/tuple, join its first scalar items into one token only
+        if there's exactly one (else flatten and keep the first)
+      - if it's a multi-word string, keep the first whitespace-delimited word
+      - non-strings/empty → empty (caller drops these)
+    """
+    if isinstance(value, (list, tuple)):
+        # Flatten one level — pick the first stringy item.
+        for item in value:
+            if isinstance(item, str) and item.strip():
+                value = item
+                break
+        else:
+            return ""
+    if not isinstance(value, str):
+        return ""
+    s = value.strip()
+    if not s:
+        return ""
+    # Collapse to first token if the model gave a multi-word string here.
+    parts = s.split()
+    return parts[0] if parts else ""
 
 
 def _parse_json(raw: str, label: str, finish_reason: str = "") -> Optional[dict]:
@@ -148,9 +222,10 @@ in this priority order:
 3. A short natural {target_lang_name} phrase (3–6 words) that meaningfully uses both ideas.
 
 REQUIREMENTS:
+- {source_clause}
 - The output MUST be a real word/phrase a fluent speaker would actually use
 - It must make logical sense — both parents must connect to it naturally
-- No nonsense made-up combinations
+- No nonsense made-up combinations, no archaic or invented forms
 - {level_line}
 
 Return a single JSON object with EXACTLY these keys (no markdown, no text outside the JSON):
@@ -189,6 +264,7 @@ async def crossbreed_quiz_package(
                                .replace("an intermediate learner",  f"an intermediate {target_lang_name} learner") \
                                .replace("a fluent speaker",         f"a fluent {target_lang_name} speaker")
 
+    source_clause = _source_clause(target_lang, vocab_level).format(lang_name=target_lang_name)
     prompt = _CROSSBREED_PROMPT.format(
         w1=word1, w1_gloss=word1_gloss, w1_lang=word1_lang,
         w2=word2, w2_gloss=word2_gloss, w2_lang=word2_lang,
@@ -196,6 +272,7 @@ async def crossbreed_quiz_package(
         def_lang_name=def_lang_name,
         level_line=level_line,
         pronunciation_format=_pronunciation_clause(target_lang),
+        source_clause=source_clause,
     )
 
     resp = await _get_client().chat.completions.create(
@@ -221,8 +298,10 @@ async def crossbreed_quiz_package(
         if not qtype:
             continue
         if qtype == "rearrange":
-            tokens = [str(t).strip() for t in (q.get("correct_tokens") or []) if str(t).strip()]
-            distractors = [str(x).strip() for x in (q.get("distractors") or []) if x][:3]
+            raw_tokens = q.get("correct_tokens") or []
+            tokens = [t for t in (_clean_single_token(t) for t in raw_tokens) if t]
+            raw_distr = q.get("distractors") or []
+            distractors = [d for d in (_clean_single_token(x) for x in raw_distr) if d][:3]
             if len(tokens) < 3 or len(distractors) < 2:
                 continue
             quizzes.append({
@@ -234,7 +313,11 @@ async def crossbreed_quiz_package(
             })
             continue
         correct     = (q.get("correct") or "").strip()
-        distractors = [str(x).strip() for x in (q.get("distractors") or []) if x][:3]
+        distractors = [
+            str(x).strip()
+            for x in (q.get("distractors") or [])
+            if isinstance(x, str) and x.strip()
+        ][:3]
         if not correct or len(distractors) < 3:
             continue
         quizzes.append({"type": qtype, "correct": correct, "distractors": distractors})
@@ -294,6 +377,7 @@ async def fetch_full_quiz_package(
             + "."
         )
 
+    source_clause = _source_clause(lang, vocab_level).format(lang_name=lang_name)
     prompt_text = _PROMPT.format(
         lang_name=lang_name,
         def_lang_name=def_lang_name,
@@ -301,6 +385,7 @@ async def fetch_full_quiz_package(
         level_line=level_line,
         exclude_line=exclude_line,
         pronunciation_format=_pronunciation_clause(lang),
+        source_clause=source_clause,
     )
 
     resp = await _get_client().chat.completions.create(
@@ -326,9 +411,17 @@ async def fetch_full_quiz_package(
             continue
 
         if qtype == "rearrange":
-            tokens = q.get("correct_tokens") or []
-            tokens = [str(t).strip() for t in tokens if str(t).strip()]
-            distractors = [str(x).strip() for x in (q.get("distractors") or []) if x][:3]
+            # Tokens and distractors must each be a SINGLE-WORD STRING. The model
+            # occasionally returns an array (e.g. ["the", "weather"]) for one of
+            # these — that creates an unusable bubble in the UI. Reject anything
+            # non-string and trim multi-word strings to their first token to
+            # keep the quiz playable.
+            raw_tokens = q.get("correct_tokens") or []
+            tokens = [_clean_single_token(t) for t in raw_tokens]
+            tokens = [t for t in tokens if t]
+            raw_distr = q.get("distractors") or []
+            distractors = [_clean_single_token(x) for x in raw_distr]
+            distractors = [d for d in distractors if d][:3]
             if len(tokens) < 3 or len(distractors) < 2:
                 continue
             quizzes.append({
@@ -341,7 +434,14 @@ async def fetch_full_quiz_package(
             continue
 
         correct = (q.get("correct") or "").strip()
-        distractors = [str(x).strip() for x in (q.get("distractors") or []) if x][:3]
+        # For meaning/synonym/antonym, each distractor is a string but may be a
+        # multi-word phrase (especially "meaning" gloss distractors). Reject
+        # only nested arrays/objects, not multi-word strings.
+        distractors = [
+            str(x).strip()
+            for x in (q.get("distractors") or [])
+            if isinstance(x, str) and x.strip()
+        ][:3]
         if not correct or len(distractors) < 3:
             continue
         entry = {"type": qtype, "correct": correct, "distractors": distractors}

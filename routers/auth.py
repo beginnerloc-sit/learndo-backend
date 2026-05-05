@@ -8,7 +8,7 @@ from jose import jwt
 from sqlalchemy.orm import Session
 
 from database import get_db
-from models import User, GardenPlant
+from models import User, GardenPlant, Harvest
 from schemas import RegisterIn, LoginIn, AuthOut, UserOut
 from config import get_settings
 
@@ -22,23 +22,34 @@ def _make_token(user_id: str) -> str:
     return jwt.encode({"sub": user_id, "exp": exp}, settings.secret_key, algorithm="HS256")
 
 
-def update_streak(user: User, db: Session) -> None:
-    """Update streak and visit count based on today's date. Safe to call on every app open."""
+def update_streak(user: User, db: Session) -> dict:
+    """Update streak and visit count based on today's date.
+
+    Safe to call on every app open. Returns metadata so the UI can show a
+    one-time "daily check-in" prompt the first time a user opens the app on
+    a given day:
+        first_today      — True iff this call transitioned last_visit_date to today
+        was_consecutive  — True iff streak went up (didn't miss a day)
+        streak           — the user's streak after this call
+    """
     today = date.today()
     last = user.last_visit_date
 
     if last == today:
-        return  # already counted today
+        return {"first_today": False, "was_consecutive": False, "streak": user.streak or 0}
 
     user.visits_count = (user.visits_count or 0) + 1
 
+    was_consecutive = False
     if last is not None and (today - last).days == 1:
         user.streak = (user.streak or 0) + 1
+        was_consecutive = True
     elif last != today:
         user.streak = 1  # missed a day or first ever visit
 
     user.last_visit_date = today
     db.commit()
+    return {"first_today": True, "was_consecutive": was_consecutive, "streak": user.streak or 0}
 
 
 def _safe_json_list(raw):
@@ -52,6 +63,7 @@ def _safe_json_list(raw):
 
 def _user_out(user: User, db: Session) -> UserOut:
     plants_count = db.query(GardenPlant).filter(GardenPlant.user_id == user.id).count()
+    harvest_count = db.query(Harvest).filter(Harvest.user_id == user.id).count()
     return UserOut(
         id=user.id,
         name=user.name,
@@ -61,11 +73,13 @@ def _user_out(user: User, db: Session) -> UserOut:
         coins=user.coins,
         visits_count=user.visits_count,
         plants_count=plants_count,
+        harvest_count=harvest_count,
         lang_prefs=_safe_json_list(user.lang_prefs),
         vocab_level=user.vocab_level,
         topic_prefs=_safe_json_list(user.topic_prefs),
         definition_lang=user.definition_lang or "english",
         collection_locked=bool(user.collection_locked),
+        tutorial_completed=bool(user.tutorial_completed),
     )
 
 

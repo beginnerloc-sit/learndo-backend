@@ -22,6 +22,7 @@ class User(Base):
     collection_locked = Column(Integer, default=0, nullable=False)  # 0 = public, 1 = private
     seeds_today_count = Column(Integer, default=0, nullable=False)  # daily seeds claimed via OpenAI
     seeds_today_date = Column(Date, nullable=True)         # the date `seeds_today_count` is for
+    tutorial_completed = Column(Integer, default=0, nullable=False)  # 0 = show walkthrough on next garden open
     created_at = Column(DateTime, server_default=func.now())
 
 
@@ -84,6 +85,21 @@ class WordReaction(Base):
     from_user_id = Column(String(20), nullable=False)
     from_name = Column(String(100), nullable=False, default="")
     emoji = Column(String(10), nullable=False)
+    created_at = Column(DateTime, server_default=func.now())
+
+
+class WordNote(Base):
+    """A short text note left by a friend on one of the user's plants.
+    Like reactions, but text rather than an emoji. One latest note per
+    (owner, word, from_user) pair — re-submitting overwrites."""
+    __tablename__ = "word_notes"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    word = Column(String(200), nullable=False, index=True)
+    owner_user_id = Column(String(20), nullable=False, index=True)
+    from_user_id = Column(String(20), nullable=False)
+    from_name = Column(String(100), nullable=False, default="")
+    text = Column(String(280), nullable=False)
     created_at = Column(DateTime, server_default=func.now())
 
 

@@ -4,6 +4,12 @@ from typing import List, Optional
 
 # ---------- User ----------
 
+class StreakCheck(BaseModel):
+    first_today: bool = False     # True the first time the user opens the app today
+    was_consecutive: bool = False # True iff streak went up (didn't miss a day)
+    streak: int = 0               # streak count after this call
+
+
 class UserOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -15,11 +21,16 @@ class UserOut(BaseModel):
     coins: int
     visits_count: int
     plants_count: int = 0
+    harvest_count: int = 0
     lang_prefs: Optional[List[str]] = []
     vocab_level: Optional[str] = None
     topic_prefs: Optional[List[str]] = []
     definition_lang: Optional[str] = "english"
     collection_locked: bool = False
+    tutorial_completed: bool = False
+    # Set on /users/me only on the FIRST call that flips last_visit_date to
+    # today. The frontend uses this to show a one-time daily-streak prompt.
+    streak_check: Optional[StreakCheck] = None
 
 
 class LangPrefsIn(BaseModel):
@@ -81,6 +92,19 @@ class ReactionOut(BaseModel):
     from_name: str
 
 
+class WordNoteOut(BaseModel):
+    from_user_id: str
+    from_name: str
+    text: str
+    created_at: str = ""
+
+
+class WriteNoteIn(BaseModel):
+    owner_user_id: str
+    word: str
+    text: str
+
+
 class GardenPlantOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -100,6 +124,7 @@ class GardenPlantOut(BaseModel):
     level: Optional[str] = None      # "beginner" | "intermediate" | "advanced"
     topic: Optional[str] = None      # e.g. "nature","food"
     reactions: List[ReactionOut] = []
+    notes: List[WordNoteOut] = []
     gifted_by: Optional[str] = None
     gifted_by_name: Optional[str] = None
 
