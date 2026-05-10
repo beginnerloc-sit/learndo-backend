@@ -1,5 +1,5 @@
 """
-Word data service backed by OpenAI gpt-5-nano.
+Word data service backed by OpenAI gpt-4o-mini.
 
 Single public function fetch_full_quiz_package(lang):
   One API call returns the word + all its linguistic data + a pool of
@@ -279,7 +279,6 @@ async def crossbreed_quiz_package(
         model="gpt-4o-mini",
         messages=[{"role": "user", "content": prompt}],
         max_completion_tokens=4000,
-        reasoning_effort="low",
     )
     choice = resp.choices[0]
     raw = (choice.message.content or "").strip()
@@ -392,7 +391,6 @@ async def fetch_full_quiz_package(
         model="gpt-4o-mini",
         messages=[{"role": "user", "content": prompt_text}],
         max_completion_tokens=4000,
-        reasoning_effort="low",
     )
     choice = resp.choices[0]
     raw = (choice.message.content or "").strip()
