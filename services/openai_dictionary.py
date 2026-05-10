@@ -276,7 +276,7 @@ async def crossbreed_quiz_package(
     )
 
     resp = await _get_client().chat.completions.create(
-        model="gpt-5-nano",
+        model="gpt-4o-mini",
         messages=[{"role": "user", "content": prompt}],
         max_completion_tokens=4000,
         reasoning_effort="low",
@@ -389,7 +389,7 @@ async def fetch_full_quiz_package(
     )
 
     resp = await _get_client().chat.completions.create(
-        model="gpt-5-nano",
+        model="gpt-4o-mini",
         messages=[{"role": "user", "content": prompt_text}],
         max_completion_tokens=4000,
         reasoning_effort="low",
